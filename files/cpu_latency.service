@@ -1,0 +1,6 @@
+[Unit]
+Description=Ship CPU latency stats to Graphite
+After=network.target
+
+[Service]
+ExecStart=/root/cpu_latency.rb
