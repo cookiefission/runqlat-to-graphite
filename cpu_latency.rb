@@ -1,6 +1,7 @@
 require 'socket'
-HOST = Socket.gethostname
 
+HOST = Socket.gethostname
+GRAPHITE_PUSH_ITERATIONS = 15
 HISTOGRAM_LINE_REGEX = %r{
   \[ # Leading [
   (\d+) # Capture bucket lower bound
@@ -10,15 +11,17 @@ HISTOGRAM_LINE_REGEX = %r{
   (\d+) # Capture bucket value
 }x
 
+GRAPHITE_HOST = ENV.fetch('GRAPHITE_HOST', 'localhost')
+BPF_LATENCY_SCRIPT = ENV.fetch('BPF_LATENCY_SCRIPT', '/root/cpu_latency.bt')
+
+# Run bpftrace in background
 io = IO.popen(
-  '/usr/bin/ssh root@54.154.141.130 -i /Users/sean/.ssh/freeagent -- ' +
-  '/usr/local/bin/bpftrace /root/cpu_latency.bt',
+  "/usr/local/bin/bpftrace #{BPF_LATENCY_SCRIPT}"
 )
 
+graphite_socket = TCPSocket.new(GRAPHITE_HOST, 2003)
 
-graphite_socket = TCPSocket.new('localhost', 2003)
-count = 0
-
+iterations = 0
 aggregate = Hash.new(0)
 
 loop do
@@ -34,16 +37,17 @@ loop do
     aggregate[bucket] += value.to_i
   end
 
-  count += 1
+  iterations += 1
 
-  if count == 14
+  # Send data to Graphite every 15 iterations (approx every 15 seconds)
+  if iterations == GRAPHITE_PUSH_ITERATIONS
     time = Time.now.to_i
     aggregate.each do |bucket, value|
       graphite_socket.puts("#{HOST}.cpu-lat.#{bucket} #{value} #{time}\n")
     end
 
     aggregate.clear
-    count = 0
+    iterations = 0
   end
 end
 
